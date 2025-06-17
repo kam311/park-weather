@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>US National Parks Weather</title>
+  <style>
+    body{margin:0;font-family:sans-serif;background:#f4f4f4;color:#333;display:flex;flex-direction:column;align-items:center;padding:2rem}
+    h1{font-size:2rem;margin:0 0 1rem}
+    .controls{display:flex;flex-wrap:wrap;gap:.75rem;margin-bottom:1rem;width:100%;max-width:1200px;justify-content:center}
+    select{padding:.4rem .6rem;border:1px solid #bbb;border-radius:6px;font-size:.9rem}
+    .park-list{display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:1rem;width:100%;max-width:1200px}
+    .park{background:#fff;padding:1rem;border-radius:8px;box-shadow:0 2px 5px rgba(0,0,0,.1);display:flex;flex-direction:column;align-items:center;text-align:center;transition:background .3s;text-decoration:none;color:inherit}
+    .park:hover{background:#e9f4ff}
+    .after-dark{background:#ddd}
+    .park h2{font-size:1.2rem;margin:.25rem 0 .4rem}
+    .icon{font-size:2rem;margin-bottom:.3rem}
+    .weather{font-size:.95rem;color:#555}
+    small{font-size:.8rem;color:#666}
+  </style>
+</head>
+<body>
+  <h1>Current Weather in US National Parks</h1>
+  <div class="controls">
+    <select id="stateFilter">
+      <option value="all">All States</option>
+    </select>
+    <select id="sortMenu">
+      <option value="name">Sort by Name (A–Z)</option>
+      <option value="temp">Sort by Current Temp</option>
+      <option value="high">Sort by High Temp</option>
+      <option value="low">Sort by Low Temp</option>
+    </select>
+  </div>
+  <div id="parks" class="park-list">Loading weather data...</div>
+
+<script>
+const parks=[
+  {name:'Acadia',state:'ME',lat:44.35,lon:-68.21,url:'https://www.nps.gov/acad'},
+  {name:'Arches',state:'UT',lat:38.7331,lon:-109.5925,url:'https://www.nps.gov/arch'},
+  {name:'Badlands',state:'SD',lat:43.8554,lon:-102.3397,url:'https://www.nps.gov/badl'},
+  {name:'Big Bend',state:'TX',lat:29.1275,lon:-103.2425,url:'https://www.nps.gov/bibe'},
+  {name:'Bryce Canyon',state:'UT',lat:37.593,lon:-112.1871,url:'https://www.nps.gov/brca'},
+  {name:'Yosemite',state:'CA',lat:37.8651,lon:-119.5383,url:'https://www.nps.gov/yose'},
+  {name:'Zion',state:'UT',lat:37.2982,lon:-113.0263,url:'https://www.nps.gov/zion'}
+];
+const container=document.getElementById('parks');
+const stateFilter=document.getElementById('stateFilter');
+const sortMenu=document.getElementById('sortMenu');
+let weatherData=[];
+
+// populate state filter
+[...new Set(parks.map(p=>p.state))].sort().forEach(st=>{
+  const opt=document.createElement('option');opt.value=st;opt.textContent=st;stateFilter.appendChild(opt);
+});
+
+stateFilter.addEventListener('change',updateDisplay);
+sortMenu.addEventListener('change',updateDisplay);
+
+async function fetchWeather(){
+  const reqs=parks.map(async park=>{
+    try{
+      const url=`https://api.open-meteo.com/v1/forecast?latitude=${park.lat}&longitude=${park.lon}&current_weather=true&daily=temperature_2m_max,temperature_2m_min,sunset&temperature_unit=fahrenheit&timezone=auto`;
+      const res=await fetch(url);
+      const data=await res.json();
+      const now=new Date(data.current_weather.time);
+      const sunset=new Date(data.daily.sunset[0]);
+      return{
+        ...park,
+        temp:data.current_weather.temperature,
+        code:data.current_weather.weathercode,
+        high:data.daily.temperature_2m_max[0],
+        low:data.daily.temperature_2m_min[0],
+        afterDark:now>sunset
+      };
+    }catch(e){
+      console.error('fetch error',park.name,e);
+      return{...park,temp:NaN,code:null,high:NaN,low:NaN,afterDark:false,error:true};
+    }
+  });
+  weatherData=await Promise.all(reqs);
+  updateDisplay();
+}
+
+function updateDisplay(){
+  const stateSel=stateFilter.value;
+  const sortSel=sortMenu.value;
+  let list=[...weatherData];
+  if(stateSel!=='all') list=list.filter(p=>p.state===stateSel);
+  list.sort((a,b)=>{
+    switch(sortSel){
+      case 'temp': return (b.temp||-Infinity)-(a.temp||-Infinity);
+      case 'high': return (b.high||-Infinity)-(a.high||-Infinity);
+      case 'low': return (a.low||Infinity)-(b.low||Infinity);
+      default: return a.name.localeCompare(b.name);
+    }
+  });
+  render(list);
+}
+
+function render(data){
+  container.innerHTML='';
+  if(!data.length){container.textContent='No parks match filter.';return;}
+  data.forEach(p=>{
+    const desc=weatherDescriptions[p.code]?.text||'Unknown';
+    const icon=weatherDescriptions[p.code]?.icon||'❓';
+    const el=document.createElement('a');
+    el.href=p.url;el.target='_blank';
+    el.className='park'+(p.afterDark?' after-dark':'');
+    el.innerHTML=`<h2>${p.name}</h2><div class='icon' aria-label='${desc}'>${icon}</div><div class='weather'>${isNaN(p.temp)?'N/A':p.temp.toFixed(1)}°F<br><small>High ${isNaN(p.high)?'N/A':p.high.toFixed(1)}°F · Low ${isNaN(p.low)?'N/A':p.low.toFixed(1)}°F</small></div>`;
+    container.appendChild(el);
+  });
+}
+
+const weatherDescriptions={
+  0:{text:'Clear',icon:'☀️'},1:{text:'Mainly clear',icon:'🌤️'},2:{text:'Partly cloudy',icon:'⛅'},3:{text:'Overcast',icon:'☁️'},
+  45:{text:'Fog',icon:'🌫️'},48:{text:'Fog',icon:'🌫️'},51:{text:'Drizzle',icon:'🌦️'},53:{text:'Drizzle',icon:'🌧️'},55:{text:'Drizzle',icon:'🌧️'},
+  56:{text:'Freezing drizzle',icon:'🥶'},57:{text:'Freezing drizzle',icon:'🥶'},61:{text:'Rain',icon:'🌧️'},63:{text:'Rain',icon:'🌧️'},65:{text:'Heavy rain',icon:'🌧️'},
+  66:{text:'Freezing rain',icon:'🥶'},67:{text:'Freezing rain',icon:'🥶'},71:{text:'Snow',icon:'🌨️'},73:{text:'Snow',icon:'🌨️'},75:{text:'Heavy snow',icon:'❄️'},
+  77:{text:'Snow grains',icon:'❄️'},80:{text:'Showers',icon:'🌦️'},81:{text:'Showers',icon:'🌧️'},82:{text:'Violent showers',icon:'⛈️'},
+  85:{text:'Snow showers',icon:'🌨️'},86:{text:'Snow showers',icon:'❄️'},95:{text:'Thunder',icon:'⛈️'},96:{text:'Thunder hail',icon:'🌩️'},99:{text:'Severe thunder',icon:'🌩️'}
+};
+
+fetchWeather();
+setInterval(fetchWeather,300000);
+</script>
+</body>
+</html>
